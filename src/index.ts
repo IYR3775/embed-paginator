@@ -3,10 +3,7 @@ import {
     MessageEmbed,
     EmbedFieldData,
     TextChannel,
-    FileOptions,
-    MessageAttachment,
-    User,
-    MessageReaction
+    MessageButton
 } from 'discord.js';
 
 const paginationTypeList = ['description', 'field', 'both'] as const;
@@ -19,20 +16,24 @@ interface EmbedItems {
 }
 
 interface EmbedOptions extends EmbedItems {
+    userID: number;
     duration: number;
     itemsPerPage: number;
     paginationType: paginationType;
     footerImageURL?: string;
+    includeHome?: boolean;
 }
 
-export class PaginatedEmbed {
+export class ButtonPages {
     private options: EmbedOptions;
 
     private messageEmbed: MessageEmbed;
     private pages: EmbedItems[];
 
-    private readonly next = '⏩';
-    private readonly previous = '⏪';
+    private readonly next = '856957074596167720';
+    private readonly previous = '856956989753000006';
+    private readonly remove = '856956871183958067';
+    private readonly home = '856957778064179281';
 
     private currentPage: number = 1;
 
@@ -148,30 +149,51 @@ export class PaginatedEmbed {
         return this;
     }
 
-    public attachFiles(files: (FileOptions | string | MessageAttachment)[]) {
-        this.messageEmbed.attachFiles(files);
-        return this;
-    }
-
     public async send(channel: TextChannel, message?: string) {
-        const msg = await channel.send(message, { embed: this.messageEmbed });
-        await msg.react(this.previous);
-        await msg.react(this.next);
+        let homeBtn;
+        let removeBtn = new MessageButton()
+            .setCustomID(this.remove)
+            .setEmoji(this.remove)
+            .setStyle("DANGER");
 
-        const filter = (reaction: MessageReaction, user: User) => {
-            return (reaction.emoji.name === this.next || reaction.emoji.name === this.previous) && !user.bot;
+        if (this.options.includeHome === true) {
+            homeBtn = new MessageButton()
+                .setCustomID(this.home)
+                .setEmoji(this.home)
+                .setStyle("PRIMARY");
+        }
+
+        let leftBtn = new MessageButton()
+            .setCustomID(this.previous)
+            .setEmoji(this.previous)
+            .setStyle("PRIMARY");
+
+        let rightBtn = new MessageButton()
+            .setCustomID(this.next)
+            .setEmoji(this.next)
+            .setStyle("PRIMARY");
+
+        if (this.pages.length === 1) {
+            leftBtn.setDisabled(true);
+            rightBtn.setDisabled(true);
+        }
+
+        const msg = await channel.send({ content: message, embeds: [this.messageEmbed], components: [this.options.includeHome ? [homeBtn, leftBtn, rightBtn, removeBtn] : [leftBtn, rightBtn, removeBtn],], });
+
+        const filter = (button) => {
+            return (button.customID === this.next || button.customID === this.previous) && button.user.id === this.options.userID;
         };
 
-        const collector = msg.createReactionCollector(filter, { time: this.options.duration });
+        const collector = msg.createMessageComponentInteractionCollector(filter, { idle: this.options.duration });
 
-        collector.on('collect', async (reaction: MessageReaction, user: User) => {
+        collector.on('collect', async (button: MessageButton) => {
             if (this.pages.length < 2) {
                 this.currentPage = 1;
                 await this.changePage();
-                await msg.edit({ embed: this.messageEmbed });
+                !(await msg.deleted) ? await msg.edit({ embeds: [this.messageEmbed], components: [this.options.includeHome ? [homeBtn, leftBtn, rightBtn, removeBtn] : [leftBtn, rightBtn, removeBtn],], }) : null;
             }
 
-            const action = reaction.emoji.name;
+            const action = button.customID;
             switch (action) {
                 case this.next:
                     this.currentPage === this.pages.length ? (this.currentPage = 1) : this.currentPage++;
@@ -179,13 +201,30 @@ export class PaginatedEmbed {
                 case this.previous:
                     this.currentPage === 1 ? (this.currentPage = this.pages.length) : this.currentPage--;
                     break;
+                case this.home:
+                    this.currentPage === 1;
+                    break;
+                case this.remove:
+                    collector.stop("DELETE");
+                    break;
             }
 
             await this.changePage();
-            await msg.edit({ embed: this.messageEmbed });
-            reaction.users.remove(user);
+            !(await msg.deleted) ? await msg.edit({ embeds: [this.messageEmbed], components: [this.options.includeHome ? [homeBtn, leftBtn, rightBtn, removeBtn] : [leftBtn, rightBtn, removeBtn],], }) : null;
         });
 
-        collector.on('end', () => msg.reactions.removeAll());
+        collector.on("end", async (collected, reason) => {
+            if (reason != "DELETE") {
+                if (this.options.includeHome === true) {
+                    homeBtn.setDisabled(true);
+                }
+                leftBtn.setDisabled(true);
+                rightBtn.setDisabled(true);
+                removeBtn.setDisabled(true);
+                !(await msg.deleted) ? await msg.edit({ embeds: [this.messageEmbed], components: [this.options.includeHome ? [homeBtn, leftBtn, rightBtn, removeBtn] : [leftBtn, rightBtn, removeBtn],], }) : null;
+            }
+
+            if (reason == "DELETE") !(await msg.deleted) ? await msg.delete() : null;
+        });
     }
 }
